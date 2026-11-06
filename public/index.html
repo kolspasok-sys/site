@@ -61,6 +61,11 @@ select{background:#171238;color:#e8ecff;border:1px solid rgba(140,120,255,.4);bo
 .card:hover:not(.off){transform:translateY(-8px)}
 .card.sel{transform:translateY(-16px);border-color:#00e5ff;box-shadow:0 0 18px rgba(0,229,255,.6)}
 .card.off{cursor:default;opacity:.85}
+.card.can{border-color:#69f0ae;box-shadow:0 0 14px rgba(105,240,174,.55);animation:canpulse 1.2s ease-in-out infinite}
+@keyframes canpulse{0%,100%{box-shadow:0 0 10px rgba(105,240,174,.4)}50%{box-shadow:0 0 22px rgba(105,240,174,.85)}}
+.card.can.sel{border-color:#00e5ff;box-shadow:0 0 18px rgba(0,229,255,.75);animation:none}
+.slot.open{cursor:pointer;border-color:rgba(0,229,255,.45)}
+.slot.open:hover{border-color:#00e5ff;color:#00e5ff;background:rgba(0,229,255,.08)}
 #actions{display:flex;gap:10px;justify-content:center;align-items:center;min-height:50px;flex-wrap:wrap}
 #actions .hint{font-size:13px;color:#9aa3d0}
 #side{width:280px;display:flex;flex-direction:column;gap:10px}
@@ -312,7 +317,7 @@ function validSelAttack(v){
 }
 function renderView(v){
   CUR={trump:v.trump};
-  $('oppname').textContent=v.oppName;
+  $('oppname').textContent=v.oppName+(v.oppBal!==null&&v.oppBal!==undefined?' · ⭐'+v.oppBal:'');
   $('obot').textContent=v.oppCount;
   $('backs').innerHTML='<div class="backcard"></div>'.repeat(Math.min(10,v.oppCount));
   $('decknum').textContent=v.deckLen;
@@ -321,16 +326,37 @@ function renderView(v){
   v.table.forEach(function(p,i){
     t+='<div class="pair">'+cardHTML(p.a,'off');
     if(p.d!==null)t+='<span class="arrow">➜</span>'+cardHTML(p.d,'off');
-    else if(v.defendTurn&&!v.locked)t+='<span class="arrow">➜</span><div class="slot'+(selAtkNet===i?' target':'')+'" onclick="'+(MODE==='net'?'netClickTable':'offClickTable')+'('+i+')">'+(selAtkNet===i?'бить сюда':'?')+'</div>';
+    else if(v.defendTurn&&!v.locked)t+='<span class="arrow">➜</span><div class="slot'+(selAtkNet===i?' target':' open')+'" onclick="'+(MODE==='net'?'netClickTable':'offClickTable')+'('+i+')">'+(selAtkNet===i?'бить сюда':'?')+'</div>';
     else t+='<span class="arrow">➜</span><div class="slot">?</div>';
     t+='</div>';
   });
   if(!t)t='<div style="color:#5a6494;font-size:14px">Стол пуст</div>';
   $('table').innerHTML=t;
   var canClick=(v.attackTurn||v.defendTurn)&&!v.locked;
+  var playable=new Set();
+  if(canClick){
+    if(v.attackTurn){
+      if(v.table.length===0){for(var pi=0;pi<v.myHand.length;pi++)playable.add(pi);}
+      else{
+        var lim2=Math.min(6,v.oppCount);
+        if(v.table.length<lim2){
+          var rks=new Set();v.table.forEach(function(p){rks.add(rank(p.a));if(p.d!==null)rks.add(rank(p.d));});
+          for(var pi=0;pi<v.myHand.length;pi++)if(rks.has(rank(v.myHand[pi])))playable.add(pi);
+        }
+      }
+    }else if(v.defendTurn){
+      for(var pi=0;pi<v.myHand.length;pi++){
+        var mc=v.myHand[pi];
+        for(var tk=0;tk<v.table.length;tk++){
+          var tp=v.table[tk];
+          if(tp.d===null&&((suit(mc)===suit(tp.a)&&rank(mc)>rank(tp.a))||(suit(mc)===v.trump&&suit(tp.a)!==v.trump))){playable.add(pi);break;}
+        }
+      }
+    }
+  }
   var h='';
   for(var i=0;i<v.myHand.length;i++){
-    h+=cardHTML(v.myHand[i],(selNet.has(i)?'sel':'')+(canClick?'':' off'),canClick?(MODE==='net'?'netClickHand('+i+')':'offClickHand('+i+')'):null);
+    h+=cardHTML(v.myHand[i],(selNet.has(i)?'sel':'')+(playable.has(i)?' can':'')+(canClick?'':' off'),canClick?(MODE==='net'?'netClickHand('+i+')':'offClickHand('+i+')'):null);
   }
   $('hand').innerHTML=h;
   var st='';
@@ -354,9 +380,14 @@ function renderView(v){
       var allBeat=v.table.length>0&&v.table.every(function(p){return p.d!==null;});
       a+='<button class="btn ghost" '+(allBeat?'':'disabled')+' onclick="'+(MODE==='net'?'netDoBito':'offBito')+'()">✨ Бито</button>';
       if(v.table.length===0&&selNet.size>1)a+='<span class="hint">Первый заход — только одной картой</span>';
+      else if(v.table.length>0){
+        var rks2=[...new Set(v.table.flatMap(function(p){return [rank(p.a)].concat(p.d!==null?[rank(p.d)]:[]);}))].map(function(r){return RANKS[r];}).join(', ');
+        a+='<span class="hint">Можно подкинуть: '+rks2+'</span>';
+      }
     }
     if(v.defendTurn){
       a+='<button class="btn danger" onclick="'+(MODE==='net'?'netDoTake':'offTake')+'()">🖐 Взять карты</button>';
+      a+='<span class="hint">Светящиеся карты отбивают атаку — кликни любую</span>';
     }
   }
   $('actions').innerHTML=a;
@@ -473,7 +504,7 @@ function renderNet(){
   var v={trump:ON.trump,trumpCardId:ON.trumpCard,deckLen:ON.deckCount,table:ON.table,
     myHand:ON.hand,oppCount:ON.counts[opp],attackTurn:attackTurn,defendTurn:defendTurn,
     oppName:ON.names[opp]+(ON.counts[opp]===0?'':''),
-    stake:ON.stake,balNames:ON.names,bals:ON.balances,commit:ON_COMMIT,locked:false,over:false};
+    oppBal:ON.balances[opp],stake:ON.stake,balNames:ON.names,bals:ON.balances,commit:ON_COMMIT,locked:false,over:false};
   // если фазы defendTurn, у соперника на столе — публично; selAtkNet валиден только пока карта небита
   renderView(v);
 }
@@ -608,7 +639,7 @@ function renderOff(){
   var defendTurn=(GO.phase==='defend'&&GO.attacker===1&&!GO.busy);
   var v={trump:GO.trump,trumpCardId:GO.origDeck[0],deckLen:GO.deck.length,table:GO.table,
     myHand:GO.hands[0],oppCount:GO.hands[1].length,attackTurn:attackTurn,defendTurn:defendTurn,
-    oppName:'Андроид-ИИ',stake:GO.stake,balNames:['Ты','Андроид'],bals:[netBalOff,'—'],commit:GO.commitment,
+    oppName:'Андроид-ИИ',oppBal:null,stake:GO.stake,balNames:['Ты','Андроид'],bals:[netBalOff,'—'],commit:GO.commitment,
     locked:GO.busy,over:GO.over};
   renderView(v);
 }
