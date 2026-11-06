@@ -13,7 +13,7 @@ const path = require('path');
 const gc = require('./gamecore.js');
 
 const PORT = process.env.PORT || 8080;
-const TURN_TIMEOUT = 45000;    // мс на ход
+const TURN_TIMEOUT = 20000;    // мс на ход — истёкшее время = поражение того, чей ход
 const GRACE_PERIOD = 90000;    // мс на переподключение при обрыве
 const MAX_STAKE = 500, MIN_STAKE = 10;
 const VERSION = '1.2';            // меняй при каждом обновлении — клиент покажет версию в шапке
@@ -98,6 +98,7 @@ function stateMsg(room, you){
     table: g.table, counts: [g.hands[0].length, g.hands[1].length],
     hand: g.hands[you].slice(),
     stake: room.stake,
+    turnEndsAt: Date.now() + TURN_TIMEOUT,
     balances: [room.players[0].user.balance, room.players[1].user.balance],
     names: [room.players[0].user.name, room.players[1].user.name]
   };
@@ -188,14 +189,8 @@ function afterAction(room, err){
 function onTurnTimeout(room){
   const g = room.game;
   if (!g || g.over || room.status !== 'playing') return;
-  if (g.phase === 'defend'){ gc.applyTake(g, 1 - g.attacker); }
-  else {
-    if (g.table.length === 0){
-      const i = gc.lowestIdx(g.hands[g.attacker], g.trump);
-      gc.applyAttack(g, g.attacker, [g.hands[g.attacker][i]]);
-    } else if (g.table.every(x => x.d !== null)) gc.applyBito(g, g.attacker);
-  }
-  afterAction(room, null);
+  const loser = (g.phase === 'defend') ? 1 - g.attacker : g.attacker;
+  settle(room, 1 - loser, 'timeout');
 }
 
 function leaveRoom(session, silent){
@@ -239,7 +234,7 @@ function handleMessage(session, m){
       if (pass.length < 4) return session.conn.send({ t: 'error', msg: 'Пароль минимум 4 символа' });
       if (db.users[name]) return session.conn.send({ t: 'error', msg: 'Такой логин занят' });
       const salt = crypto.randomBytes(16).toString('hex');
-      db.users[name] = { salt, hash: gc.sha256hex(Buffer.from(salt + pass)), balance: 1000, wins: 0, losses: 0 };
+      db.users[name] = { name, salt, hash: gc.sha256hex(Buffer.from(salt + pass)), balance: 1000, wins: 0, losses: 0 };
       save();
       session.user = db.users[name]; session.name = name;
       session.conn.send({ t: 'auth_ok', name, balance: 1000 });
@@ -250,6 +245,7 @@ function handleMessage(session, m){
       const rec = db.users[name];
       if (!rec || rec.hash !== gc.sha256hex(Buffer.from(rec.salt + pass)))
         return session.conn.send({ t: 'error', msg: 'Неверный логин или пароль' });
+      rec.name = rec.name || name;
       session.user = rec; session.name = name;
       session.conn.send({ t: 'auth_ok', name, balance: rec.balance, wins: rec.wins || 0, losses: rec.losses || 0 });
       break;
