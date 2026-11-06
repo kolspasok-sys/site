@@ -51,6 +51,7 @@ function validateAttack(g, p, cards){
   if (g.over) return 'game over';
   if (p !== g.attacker || g.phase !== 'attack') return 'not your turn';
   if (!Array.isArray(cards) || cards.length < 1) return 'no cards';
+  if (g.table.length === 0 && cards.length !== 1) return 'first attack is single card';
   const limit = Math.min(6, g.hands[1-g.attacker].length);
   if (g.table.length + cards.length > limit) return 'too many cards';
   for (const c of cards){
@@ -98,8 +99,8 @@ function endBout(g, defended){
   if (g.deck.length === 0){
     if (defended && g.hands[def].length === 0){ g.over = true; g.winner = def; return; }
     if (g.hands[g.attacker].length === 0){ g.over = true; g.winner = g.attacker; return; }
-    g.attacker = 1 - g.attacker;
   }
+  if (defended) g.attacker = def;   // «бито» — следующим ходит отбившийся
   g.phase = 'attack';
 }
 
