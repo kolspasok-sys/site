@@ -296,6 +296,15 @@ function cardHTML(c,cls,onclick){
   return '<div class="card '+(isRed(c)?'rd':'bk')+(suit(c)===CUR.trump?' trump':'')+(cls?' '+cls:'')+'" '+(onclick?'onclick="'+onclick+'"':'')+'><span>'+RANKS[rank(c)]+'</span><small>'+SUITS[suit(c)]+'</small></div>';
 }
 var CUR={trump:0}; // текущий козырь для cardHTML
+function validSelAttack(v){
+  if(selNet.size===0)return false;
+  var lim=Math.min(6,v.oppCount);
+  if(v.table.length+selNet.size>lim)return false;
+  if(v.table.length===0)return true;
+  var ranks=new Set();v.table.forEach(function(p){ranks.add(rank(p.a));if(p.d!==null)ranks.add(rank(p.d));});
+  for(var i of selNet){if(!ranks.has(rank(v.myHand[i])))return false;}
+  return true;
+}
 function renderView(v){
   CUR={trump:v.trump};
   $('oppname').textContent=v.oppName;
@@ -307,7 +316,7 @@ function renderView(v){
   v.table.forEach(function(p,i){
     t+='<div class="pair">'+cardHTML(p.a,'off');
     if(p.d!==null)t+='<span class="arrow">➜</span>'+cardHTML(p.d,'off');
-    else if(v.defendTurn&&!v.locked)t+='<span class="arrow">➜</span><div class="slot'+(selAtkNet===i?' target':'')+'" onclick="netClickTable('+i+')">'+(selAtkNet===i?'бить сюда':'?')+'</div>';
+    else if(v.defendTurn&&!v.locked)t+='<span class="arrow">➜</span><div class="slot'+(selAtkNet===i?' target':'')+'" onclick="'+(MODE==='net'?'netClickTable':'offClickTable')+'('+i+')">'+(selAtkNet===i?'бить сюда':'?')+'</div>';
     else t+='<span class="arrow">➜</span><div class="slot">?</div>';
     t+='</div>';
   });
@@ -316,7 +325,7 @@ function renderView(v){
   var canClick=(v.attackTurn||v.defendTurn)&&!v.locked;
   var h='';
   for(var i=0;i<v.myHand.length;i++){
-    h+=cardHTML(v.myHand[i],(selNet.has(i)?'sel':'')+(canClick?'':' off'),canClick?'netClickHand('+i+')':null);
+    h+=cardHTML(v.myHand[i],(selNet.has(i)?'sel':'')+(canClick?'':' off'),canClick?(MODE==='net'?'netClickHand('+i+')':'offClickHand('+i+')'):null);
   }
   $('hand').innerHTML=h;
   var st='';
@@ -336,12 +345,12 @@ function renderView(v){
   var a='';
   if(!v.over&&!v.locked){
     if(v.attackTurn){
-      a+='<button class="btn" '+(netValidAttack(v)?'':'disabled')+' onclick="netDoAttack()">⚔️ Атаковать</button>';
+      a+='<button class="btn" '+(validSelAttack(v)?'':'disabled')+' onclick="'+(MODE==='net'?'netDoAttack':'offAttack')+'()">⚔️ Атаковать</button>';
       var allBeat=v.table.length>0&&v.table.every(function(p){return p.d!==null;});
-      a+='<button class="btn ghost" '+(allBeat?'':'disabled')+' onclick="netDoBito()">✨ Бито</button>';
+      a+='<button class="btn ghost" '+(allBeat?'':'disabled')+' onclick="'+(MODE==='net'?'netDoBito':'offBito')+'()">✨ Бито</button>';
     }
     if(v.defendTurn){
-      a+='<button class="btn danger" onclick="netDoTake()">🖐 Взять карты</button>';
+      a+='<button class="btn danger" onclick="'+(MODE==='net'?'netDoTake':'offTake')+'()">🖐 Взять карты</button>';
     }
   }
   $('actions').innerHTML=a;
@@ -350,12 +359,13 @@ function renderView(v){
 /* ================= СЕТЕВОЙ РЕЖИМ ================= */
 var WS_URL=(location.protocol==='https:'?'wss://':'ws://')+location.host;
 var ws=null, netName=null, netBal=0, myRole='guest', roomCodeNet=null, readySent=false;
+var MODE='net';
 var ON=null, OVER=null, NET_UP=false;
 
 function connect(){
   ws=new WebSocket(WS_URL);
   ws.onopen=function(){$('authstatus').textContent='Сервер подключён. Войди или зарегистрируйся.';setChip(true);};
-  ws.onclose=function(){setChip(false);if($('game')&&!$('game').classList.contains('hidden')){toast('Соединение потеряно');} $('authstatus').textContent='Сервер недоступен. Запусти node server.js и обнови страницу.';};
+  ws.onclose=function(){setChip(false);toast('Соединение с сервером потеряно — обнови страницу');$('authstatus').textContent='Сервер недоступен. Запусти node server.js и обнови страницу.';};
   ws.onerror=function(){$('authstatus').textContent='Не удалось подключиться к серверу.';};
   ws.onmessage=function(ev){
     var m; try{m=JSON.parse(ev.data);}catch(e){return;}
@@ -364,14 +374,14 @@ function connect(){
     if(m.t==='room'){roomCodeNet=m.code;myRole=m.role;enterLobby(m);return;}
     if(m.t==='joined'){toast(m.name+' подключился',true);$('lobbysub').textContent='Соперник найден! Ставка и «Готов»';return;}
     if(m.t==='stake'){ON_STAKE=m.amount;$('lstake').value=m.amount;lstakeChanged();return;}
-    if(m.t==='start'){OVER=null;selNet.clear();selAtkNet=-1;$('log').innerHTML='';ON_COMMIT=m.commitment;$('g_commit').textContent=m.commitment.substr(0,16)+'…';showGameScreen();log('Раздача зафиксирована сервером. Козырь: '+SUITS[m.trump]);return;}
+    if(m.t==='start'){closeFair();OVER=null;selNet.clear();selAtkNet=-1;$('log').innerHTML='';ON_COMMIT=m.commitment;$('g_commit').textContent=m.commitment.substr(0,16)+'…';showGameScreen();log('Раздача зафиксирована сервером. Козырь: '+SUITS[m.trump]);return;}
     if(m.t==='state'){ON=m;OVER=null;renderNet();return;}
     if(m.t==='over'){OVER=m;showOverNet(m);return;}
     if(m.t==='notice'){toast(m.msg,true);return;}
   };
 }
 function setChip(up){NET_UP=up;$('connchip').textContent=(up?'🛡':'⚠️')+' Честность: SHA-256 + HMAC'+(up?'':' (офлайн)');}
-function wsSend(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
+function wsSend(o){if(ws&&ws.readyState===1){ws.send(JSON.stringify(o));return true;}toast('Нет соединения с сервером — обнови страницу');return false;}
 
 function doAuth(reg){
   var u=$('login').value.trim(),p=$('pass').value;
@@ -410,6 +420,7 @@ function netLeaveToMenu(){wsSend({t:'leave'});enterMenu();}
 function showGameScreen(){$('menu').classList.add('hidden');$('lobby').classList.add('hidden');$('game').classList.remove('hidden');}
 
 function renderNet(){
+  MODE='net';
   var me=ON.you, opp=1-me;
   var attackTurn=(ON.await==='attack'&&ON.turn===me);
   var defendTurn=(ON.await==='defend'&&ON.turn!==me);
@@ -544,7 +555,7 @@ function startOffline(){
   renderOff();
 }
 function renderOff(){
-  var me=GO.attacker===0?{a:true,d:false}:{a:false,d:GO.phase==='defend'};
+  MODE='off';
   var attackTurn=(GO.attacker===0&&GO.phase==='attack'&&!GO.busy);
   var defendTurn=(GO.phase==='defend'&&GO.attacker===1&&!GO.busy);
   var v={trump:GO.trump,trumpCardId:GO.origDeck[0],deckLen:GO.deck.length,table:GO.table,
@@ -552,33 +563,6 @@ function renderOff(){
     oppName:'Андроид-ИИ',stake:GO.stake,balNames:['Ты','Андроид'],bals:[netBalOff,'—'],commit:GO.commitment,
     locked:GO.busy,over:GO.over};
   renderView(v);
-  // переопределим обработчики на локальные (костыль через onclick-переустановку)
-  fixOffHandlers(attackTurn,defendTurn);
-}
-function fixOffHandlers(attackTurn,defendTurn){
-  var t='';
-  if(!GO.over&&!GO.busy){
-    if(attackTurn){
-      var ok=selNet.size>0;
-      if(ok&&GO.table.length>0){
-        var lim=Math.min(6,GO.hands[1].length);
-        if(GO.table.length+selNet.size>lim)ok=false;
-        else{var ranks=new Set();GO.table.forEach(function(p){ranks.add(rank(p.a));if(p.d!==null)ranks.add(rank(p.d));});
-          for(var i of selNet)if(!ranks.has(rank(GO.hands[0][i])))ok=false;}
-      }
-      t+='<button class="btn" '+(ok?'':'disabled')+' onclick="offAttack()">⚔️ Атаковать</button>';
-      var allBeat=GO.table.length>0&&GO.table.every(function(p){return p.d!==null;});
-      t+='<button class="btn ghost" '+(allBeat?'':'disabled')+' onclick="offBito()">✨ Бито</button>';
-    }
-    if(defendTurn)t+='<button class="btn danger" onclick="offTake()">🖐 Взять карты</button>';
-  }
-  $('actions').innerHTML=t;
-  // карты и слоты: перевешиваем onclick на локальные
-  var canClick=attackTurn||defendTurn;
-  var cards=$('hand').children;
-  for(var i=0;i<cards.length;i++)cards[i].setAttribute('onclick',canClick?'offClickHand('+i+')':'');
-  var slots=$('table').querySelectorAll('.slot.target,.slot');
-  slots.forEach(function(s,idx){});
 }
 function offClickHand(i){
   if(GO.over||GO.busy)return;
@@ -601,6 +585,7 @@ function offClickTable(i){
   if(GO.phase==='defend'&&GO.attacker===1&&GO.table[i].d===null){selAtkNet=(selAtkNet===i?-1:i);renderOff();}
 }
 function offAttack(){
+  if(selNet.size===0)return;
   var idxs=[...selNet].sort(function(a,b){return b-a;});
   for(var i of idxs){GO.table.push({a:GO.hands[0][i],d:null});GO.hands[0].splice(i,1);}
   selNet.clear();
