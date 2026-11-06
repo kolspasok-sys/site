@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 8080;
 const TURN_TIMEOUT = 45000;    // мс на ход
 const GRACE_PERIOD = 90000;    // мс на переподключение при обрыве
 const MAX_STAKE = 500, MIN_STAKE = 10;
-const VERSION = '1.1';            // меняй при каждом обновлении — клиент покажет версию в шапке
+const VERSION = '1.2';            // меняй при каждом обновлении — клиент покажет версию в шапке
 
 /* ---------- хранилище ---------- */
 const DATA_FILE = path.join(__dirname, 'data.json');
@@ -261,7 +261,7 @@ function handleMessage(session, m){
       const room = { code, players: [session, null], stake: 100, status: 'lobby', game: null, turnTimer: null, again: [false, false] };
       rooms.set(code, room);
       session.room = room;
-      session.conn.send({ t: 'room', code, role: 'host', stake: 100 });
+      session.conn.send({ t: 'room', code, role: 'host', stake: 100, you: 0 });
       session.conn.send(lobbyMsg(room));
       broadcastRooms();
       break;
@@ -274,7 +274,7 @@ function handleMessage(session, m){
       if (session.room) leaveRoom(session, true);
       room.players[1] = session;
       session.room = room;
-      session.conn.send({ t: 'room', code: room.code, role: 'guest', stake: room.stake });
+      session.conn.send({ t: 'room', code: room.code, role: 'guest', stake: room.stake, you: 1 });
       sendPlayer(room, 0, { t: 'joined', name: u.name });
       broadcast(room, lobbyMsg(room));
       broadcastRooms();
@@ -286,11 +286,13 @@ function handleMessage(session, m){
       if (room.players[0] !== session) return session.conn.send({ t: 'error', msg: 'Ставку задаёт хозяин стола' });
       const a = parseInt(m.amount, 10);
       if (!(a >= MIN_STAKE && a <= MAX_STAKE)) return session.conn.send({ t: 'error', msg: 'Ставка от ' + MIN_STAKE + ' до ' + MAX_STAKE });
-      room.stake = a;
-      room.again = [false, false];
-      broadcast(room, { t: 'stake', amount: a });
-      broadcast(room, lobbyMsg(room));
-      broadcastRooms();
+      if (a !== room.stake){
+        room.stake = a;
+        room.again = [false, false];
+        broadcast(room, { t: 'stake', amount: a });
+        broadcast(room, lobbyMsg(room));
+        broadcastRooms();
+      }
       break;
     }
     case 'ready': {
