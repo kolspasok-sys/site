@@ -112,6 +112,24 @@ function resetTurnTimer(room){
   }
 }
 
+function roomsList(){
+  const out = [];
+  for (const room of rooms.values()){
+    if (room.status === 'lobby' && room.players[0]){
+      out.push({ code: room.code, stake: room.stake, host: room.players[0].user.name,
+        players: (room.players[0] ? 1 : 0) + (room.players[1] ? 1 : 0) });
+    }
+  }
+  return out.slice(0, 30);
+}
+function broadcastRooms(){
+  const msg = { t: 'rooms', rooms: roomsList() };
+  for (const s2 of sessions) s2.conn.send(msg);
+}
+function lobbyMsg(room){
+  return { t: 'lobby', stake: room.stake, again: room.again.slice(),
+    names: [room.players[0] ? room.players[0].user.name : null, room.players[1] ? room.players[1].user.name : null] };
+}
 function startGame(room){
   const stake = room.stake;
   for (const p of room.players){
@@ -122,6 +140,7 @@ function startGame(room){
   const seed = crypto.randomBytes(32).toString('hex');
   room.game = gc.createGame(seed);
   room.status = 'playing';
+  broadcastRooms();
   room.again = [false, false];
   for (const i of [0, 1]){
     sendPlayer(room, i, {
@@ -198,13 +217,21 @@ function leaveRoom(session, silent){
     rooms.delete(room.code);
   }
   session.room = null;
+  broadcastRooms();
 }
 
-/* ---------- обработка сообщений ---------- */
+// ---------- обработка сообщений ----------
 const sessions = new Set();
 function handleMessage(session, m){
   const u = session.user;
   switch (m.t){
+    case 'guest': {
+      const gname = 'Гость-' + Math.floor(1000 + Math.random() * 9000);
+      session.user = { name: gname, balance: 1000, guest: true };
+      session.name = gname;
+      session.conn.send({ t: 'auth_ok', name: gname, balance: 1000, guest: true });
+      break;
+    }
     case 'reg': {
       const name = String(m.u || '').trim(), pass = String(m.p || '');
       if (!/^[a-zA-Z0-9_]{3,20}$/.test(name)) return session.conn.send({ t: 'error', msg: 'Логин: 3-20 символов (латиница, цифры, _)' });
@@ -234,6 +261,8 @@ function handleMessage(session, m){
       rooms.set(code, room);
       session.room = room;
       session.conn.send({ t: 'room', code, role: 'host', stake: 100 });
+      session.conn.send(lobbyMsg(room));
+      broadcastRooms();
       break;
     }
     case 'join': {
@@ -246,6 +275,8 @@ function handleMessage(session, m){
       session.room = room;
       session.conn.send({ t: 'room', code: room.code, role: 'guest', stake: room.stake });
       sendPlayer(room, 0, { t: 'joined', name: u.name });
+      broadcast(room, lobbyMsg(room));
+      broadcastRooms();
       break;
     }
     case 'stake': {
@@ -257,6 +288,8 @@ function handleMessage(session, m){
       room.stake = a;
       room.again = [false, false];
       broadcast(room, { t: 'stake', amount: a });
+      broadcast(room, lobbyMsg(room));
+      broadcastRooms();
       break;
     }
     case 'ready': {
@@ -264,8 +297,12 @@ function handleMessage(session, m){
       if (!room) return;
       const idx = room.players.indexOf(session);
       if (idx < 0) return;
-      if (room.status === 'lobby'){ room.again[idx] = true; if (room.players[0] && room.players[1] && room.again[0] && room.again[1]){ room.again = [false, false]; startGame(room); } }
-      else if (room.status === 'over'){ room.again[idx] = true; if (room.players[0] && room.players[1] && room.again[0] && room.again[1]){ room.again = [false, false]; startGame(room); } }
+      room.again[idx] = true;
+      broadcast(room, lobbyMsg(room));
+      if (room.players[0] && room.players[1] && room.again[0] && room.again[1] && (room.status === 'lobby' || room.status === 'over')){
+        room.again = [false, false];
+        startGame(room);
+      }
       break;
     }
     case 'attack': {
