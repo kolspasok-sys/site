@@ -107,6 +107,9 @@ select{background:#171238;color:#e8ecff;border:1px solid rgba(140,120,255,.4);bo
       <button class="btn" onclick="doAuth(false)">Войти</button>
       <button class="btn ghost" onclick="doAuth(true)">Зарегистрироваться</button>
     </div>
+    <div class="row" style="justify-content:center;margin-top:4px">
+      <button class="btn" onclick="doGuest()">🚀 Играть без регистрации</button>
+    </div>
     <p class="note" id="authstatus">Подключение к серверу…</p>
   </div>
   <div class="divider">или</div>
@@ -123,10 +126,11 @@ select{background:#171238;color:#e8ecff;border:1px solid rgba(140,120,255,.4);bo
   <div class="panel glass">
     <h3 style="margin-bottom:10px">🛰 Игра по сети</h3>
     <div class="row">
-      <button class="btn" onclick="netCreate()">Создать стол</button>
-      <input type="text" id="joincode" placeholder="GX-0000" style="max-width:130px;text-transform:uppercase">
-      <button class="btn ghost" onclick="netJoin()">Подключиться</button>
+      <button class="btn" onclick="netCreate()">Создать публичный стол</button>
+      <input type="text" id="joincode" placeholder="или код GX-0000" style="max-width:150px;text-transform:uppercase">
+      <button class="btn ghost" onclick="netJoin()">Войти по коду</button>
     </div>
+    <div id="roomslist" style="margin-top:10px"></div>
   </div>
   <div class="panel glass" id="setupbox">
     <h3 style="margin-bottom:10px">🤖 Локально против ИИ</h3>
@@ -163,6 +167,7 @@ select{background:#171238;color:#e8ecff;border:1px solid rgba(140,120,255,.4);bo
       <div class="si">Комиссия<b id="lcomm">40</b></div>
       <div class="si">Выплата<b id="lwin" style="color:#69f0ae">160</b></div>
     </div>
+    <div id="readystatus" style="margin:10px 0"></div>
     <div class="mrow" style="justify-content:center">
       <button class="btn" onclick="netReady()">✅ Готов</button>
       <button class="btn ghost" onclick="netLeave()">Покинуть стол</button>
@@ -372,6 +377,8 @@ function connect(){
     if(m.t==='error'){toast(m.msg);return;}
     if(m.t==='auth_ok'){netName=m.name;netBal=m.balance;enterMenu();return;}
     if(m.t==='room'){roomCodeNet=m.code;myRole=m.role;enterLobby(m);return;}
+    if(m.t==='rooms'){renderRooms(m.rooms);return;}
+    if(m.t==='lobby'){renderLobbyStatus(m);return;}
     if(m.t==='joined'){toast(m.name+' подключился',true);$('lobbysub').textContent='Соперник найден! Ставка и «Готов»';return;}
     if(m.t==='stake'){ON_STAKE=m.amount;$('lstake').value=m.amount;lstakeChanged();return;}
     if(m.t==='start'){closeFair();OVER=null;selNet.clear();selAtkNet=-1;$('log').innerHTML='';ON_COMMIT=m.commitment;$('g_commit').textContent=m.commitment.substr(0,16)+'…';showGameScreen();log('Раздача зафиксирована сервером. Козырь: '+SUITS[m.trump]);return;}
@@ -393,6 +400,30 @@ function enterMenu(){
   $('menu').classList.remove('hidden');
   $('menuname').textContent=netName;$('balname').textContent=netName;$('bal').textContent=netBal;
 }
+function doGuest(){wsSend({t:'guest'});}
+function renderRooms(list){
+  var el=$('roomslist');
+  if(!el)return;
+  if(!list||!list.length){el.innerHTML='<p class="note">Открытых столов нет — создай свой, он появится в этом списке у всех игроков.</p>';return;}
+  var h='<div style="font-size:12px;color:#9aa3d0;margin-bottom:6px">Открытые столы (обновляется автоматически):</div>';
+  list.forEach(function(r){
+    h+='<div class="row" style="justify-content:space-between;background:rgba(10,8,28,.5);border:1px solid rgba(140,120,255,.2);border-radius:10px;padding:8px 12px;margin:6px 0">'
+      +'<span><b style="color:#7ee7ff">'+r.code+'</b> · '+r.host+' · ставка '+r.stake+' · '+r.players+'/2</span>'
+      +'<button class="btn" style="padding:6px 16px;font-size:13px" onclick="netJoinByCode(\''+r.code+'\')">Сесть за стол</button></div>';
+  });
+  el.innerHTML=h;
+}
+function netJoinByCode(code){wsSend({t:'join',code:code});}
+function renderLobbyStatus(m){
+  var el=$('readystatus');
+  if(!el)return;
+  if(m.stake&&parseInt($('lstake').value,10)!==m.stake){$('lstake').value=m.stake;lstakeChanged();}
+  function line(i){
+    if(!m.names||!m.names[i])return '<span style="color:#5a6494">— свободно —</span>';
+    return '<span>'+((m.again&&m.again[i])?'✅':'⏳')+' '+m.names[i]+'</span>';
+  }
+  el.innerHTML='<div class="row" style="justify-content:center;gap:16px;font-size:14px">'+line(0)+'<span style="color:#5a6494">⚔</span>'+line(1)+'</div>';
+}
 function netCreate(){wsSend({t:'create'});}
 function netJoin(){
   var c=$('joincode').value.trim().toUpperCase();
@@ -406,6 +437,7 @@ function enterLobby(m){
   $('roomcode').textContent=m.code;
   $('lobbysub').textContent=m.role==='host'?'Ожидание соперника… подключение по коду '+m.code:'Ты в столе '+m.code;
   $('stakerow').style.display=m.role==='host'?'flex':'none';
+  $('readystatus').innerHTML='';
   $('lstake').value=m.stake;lstakeChanged();
   readySent=false;
 }
@@ -414,7 +446,7 @@ function lstakeChanged(){
   $('lstakeval').textContent=s;$('lbank').textContent=s*2;$('lcomm').textContent=Math.floor(s*2*0.2);$('lwin').textContent=s*2-Math.floor(s*2*0.2);
   if(myRole==='host')wsSend({t:'stake',amount:s});
 }
-function netReady(){readySent=true;wsSend({t:'ready'});toast('Ждём соперника…',true);}
+function netReady(){readySent=true;wsSend({t:'ready'});toast('Готовность отправлена',true);}
 function netLeave(){wsSend({t:'leave'});enterMenu();}
 function netLeaveToMenu(){wsSend({t:'leave'});enterMenu();}
 function showGameScreen(){$('menu').classList.add('hidden');$('lobby').classList.add('hidden');$('game').classList.remove('hidden');}
