@@ -73,6 +73,15 @@ function applyAttack(g, p, cards){
   g.phase = 'defend';
 }
 
+function hasValidAttack(g){
+  if (g.table.length === 0) return g.hands[g.attacker].length > 0;
+  const limit = Math.min(6, g.hands[1-g.attacker].length);
+  if (g.table.length >= limit) return false;
+  const ranks = new Set();
+  for (const p of g.table){ ranks.add(rank(p.a)); if (p.d !== null) ranks.add(rank(p.d)); }
+  return g.hands[g.attacker].some(c => ranks.has(rank(c)));
+}
+
 function applyBeat(g, p, ti, card){
   if (g.over) return 'game over';
   const def = 1 - g.attacker;
@@ -82,7 +91,10 @@ function applyBeat(g, p, ti, card){
   if (!canBeat(card, g.table[ti].a, g.trump)) return 'cannot beat';
   g.table[ti].d = card;
   g.hands[p].splice(g.hands[p].indexOf(card), 1);
-  if (g.table.every(x => x.d !== null)) g.phase = 'attack'; // отбился — атакующий решает: подкинуть или бито
+  if (g.table.every(x => x.d !== null)){ // отбился — атакующий решает: подкинуть или бито
+    g.phase = 'attack';
+    if (!hasValidAttack(g)) endBout(g, true);   // нечего подкинуть — «бито» автоматически
+  }
   return null;
 }
 
@@ -140,6 +152,9 @@ function lowestIdx(hand, trump){
   return bi;
 }
 
+module.exports = { rank, suit, sha256hex, hmacSha256, deriveDeck, createGame, hasValidAttack,
+  validateAttack, applyAttack, applyBeat, applyTake, applyBito, endBout,
+  canBeat, cardCost, findBeating, lowestIdx, sortHand };
 module.exports = { rank, suit, sha256hex, hmacSha256, deriveDeck, createGame,
   validateAttack, applyAttack, applyBeat, applyTake, applyBito, endBout,
   canBeat, cardCost, findBeating, lowestIdx, sortHand };
