@@ -365,7 +365,8 @@ function renderView(v){
   else if(v.attackTurn)st=v.table.length?'Ваш ход: подкиньте того же достоинства или «Бито»':'Ваш ход: атакуйте';
   else if(v.defendTurn)st='Защищайтесь: выберите атаку и карту, или «Взять»';
   else st='Ход соперника…';
-  $('status').textContent=st;
+  $('status').innerHTML=st+' <span id="turnclock" style="font-weight:700;margin-left:10px"></span>';
+  syncClock(v);
   $('g_stake').textContent=v.stake;
   $('g_bank').textContent=v.stake*2;
   $('g_comm').textContent=Math.floor(v.stake*2*0.2);
@@ -392,6 +393,24 @@ function renderView(v){
   }
   $('actions').innerHTML=a;
 }
+
+/* ================= ЧАСЫ ХОДА (20 сек) ================= */
+var clockTimer=null, clockDeadline=0;
+function stopClock(){if(clockTimer){clearInterval(clockTimer);clockTimer=null;}}
+function startClock(dl){
+  stopClock(); clockDeadline=dl;
+  clockTimer=setInterval(function(){
+    var el=$('turnclock'); if(!el){stopClock();return;}
+    var left=Math.max(0,Math.ceil((clockDeadline-Date.now())/1000));
+    el.textContent='\u23F1 '+left+'\u0441';
+    el.style.color=left<=5?'#ff8a80':'#9be7ff';
+    if(left<=0){
+      stopClock();
+      if(MODE==='off'&&GO&&!GO.over){ log('\u23F1 Время вышло — поражение'); endGameOff(1); }
+    }
+  },300);
+}
+function syncClock(v){ if(v.clockDeadline)startClock(v.clockDeadline); else stopClock(); }
 
 /* ================= СЕТЕВОЙ РЕЖИМ ================= */
 var WS_URL=(location.protocol==='https:'?'wss://':'ws://')+location.host;
@@ -504,7 +523,7 @@ function renderNet(){
   var v={trump:ON.trump,trumpCardId:ON.trumpCard,deckLen:ON.deckCount,table:ON.table,
     myHand:ON.hand,oppCount:ON.counts[opp],attackTurn:attackTurn,defendTurn:defendTurn,
     oppName:ON.names[opp]+(ON.counts[opp]===0?'':''),
-    oppBal:ON.balances[opp],stake:ON.stake,balNames:ON.names,bals:ON.balances,commit:ON_COMMIT,locked:false,over:false};
+    oppBal:ON.balances[opp],stake:ON.stake,balNames:ON.names,bals:ON.balances,commit:ON_COMMIT,locked:false,over:false,clockDeadline:(ON.turnEndsAt||null)};
   // если фазы defendTurn, у соперника на столе — публично; selAtkNet валиден только пока карта небита
   renderView(v);
 }
@@ -551,12 +570,13 @@ function netDoTake(){wsSend({t:'take'});}
 
 var ON_COMMIT=null;
 function showOverNet(m){
+  stopClock();
   var me=ON?ON.you:0;
   var win=(m.winner===me);
   netBal=m.balances[me];$('bal').textContent=netBal;
   var title=(win?'🏆 Победа! +'+m.payout:'💀 Поражение')+' <span style="font-size:14px;color:#9aa3d0">(комиссия '+m.commission+')</span>';
   var body='<p class="note">Банк '+m.bank+', комиссия 20% = '+m.commission+', выплата '+m.payout+'.</p>'+
-   (m.reason==='forfeit'?'<p class="note">Соперник не вернулся — техническое поражение.</p>':'')+
+   (m.reason==='forfeit'?'<p class="note">Соперник не вернулся — техническое поражение.</p>':(m.reason==='timeout'?'<p class="note">Время хода вышло (20 сек) — техническое поражение.</p>':''))+
    '<p class="note">Секрет раздачи раскрыт сервером — проверь честность:</p>'+
    '<div class="mono">Секрет (seed):<br>'+m.seed+'</div>'+
    '<div class="mono">Коммитмент:<br>'+m.commitment+'</div>'+
@@ -625,6 +645,7 @@ function startOffline(){
   function lowT(h){var m=99;for(var i=0;i<h.length;i++)if(suit(h[i])===trump&&rank(h[i])<m)m=rank(h[i]);return m;}
   GO={seed:seed,commitment:sha256Hex(hexToBytes(seed)),origDeck:origDeck,deck:deck,trump:trump,hands:hands,table:[],
     attacker:lowT(hands[0])<lowT(hands[1])?0:1,phase:'attack',stake:stake,busy:false,over:false};
+  GO.turnEndsAt=null;
   selNet.clear();selAtkNet=-1;
   $('log').innerHTML='';
   showGameScreen();
@@ -637,10 +658,12 @@ function renderOff(){
   MODE='off';
   var attackTurn=(GO.attacker===0&&GO.phase==='attack'&&!GO.busy);
   var defendTurn=(GO.phase==='defend'&&GO.attacker===1&&!GO.busy);
+  if(!GO.over&&!GO.busy&&(attackTurn||defendTurn)){ if(!GO.turnEndsAt)GO.turnEndsAt=Date.now()+20000; var cdl=GO.turnEndsAt; }
+  else { GO.turnEndsAt=null; var cdl=null; }
   var v={trump:GO.trump,trumpCardId:GO.origDeck[0],deckLen:GO.deck.length,table:GO.table,
     myHand:GO.hands[0],oppCount:GO.hands[1].length,attackTurn:attackTurn,defendTurn:defendTurn,
     oppName:'Андроид-ИИ',oppBal:null,stake:GO.stake,balNames:['Ты','Андроид'],bals:[netBalOff,'—'],commit:GO.commitment,
-    locked:GO.busy,over:GO.over};
+    locked:GO.busy,over:GO.over,clockDeadline:cdl};
   renderView(v);
 }
 function offClickHand(i){
@@ -658,7 +681,7 @@ function offClickHand(i){
     if((suit(def)===suit(atk)&&rank(def)>rank(atk))||(suit(def)===GO.trump&&suit(atk)!==GO.trump)){
       GO.table[selAtkNet].d=def;GO.hands[0].splice(i,1);selAtkNet=-1;
       log('Ты отбился: '+cardName(def));
-      if(GO.table.every(function(p){return p.d!==null;}))GO.phase='attack';
+      if(GO.table.every(function(p){return p.d!==null;})){GO.phase='attack';renderOff();botAddOrBito();return;}
       renderOff();
     }else toast(cardName(def)+' не бьёт '+cardName(atk));
   }
@@ -698,7 +721,9 @@ async function botDefend(){
     if(GO.table.every(function(p){return p.d!==null;}))GO.phase='attack';
     renderOff();
   }
-  GO.busy=false;GO.phase='attack';renderOff();
+  GO.busy=false;GO.phase='attack';
+  if(!hasValidAddOff()){log('Бито — нечего подкинуть');endBoutOff(true);return;}
+  renderOff();
 }
 async function botAttack(){
   GO.busy=true;GO.phase='attack';renderOff();
@@ -723,7 +748,39 @@ async function botAttack(){
   log('Атака Андроида: '+GO.table.map(function(p){return cardName(p.a);}).join(', '));
   GO.phase='defend';GO.busy=false;selAtkNet=-1;renderOff();
 }
+function hasValidAddOff(){
+  if(GO.table.length===0)return GO.hands[0].length>0;
+  var lim=Math.min(6,GO.hands[1].length);
+  if(GO.table.length>=lim)return false;
+  var ranks=new Set();GO.table.forEach(function(p){ranks.add(rank(p.a));if(p.d!==null)ranks.add(rank(p.d));});
+  return GO.hands[0].some(function(c){return ranks.has(rank(c));});
+}
+async function botAddOrBito(){
+  GO.busy=true;renderOff();
+  await sleep(500);
+  if(!GO||GO.over)return;
+  var added=false;
+  while(true){
+    var lim=Math.min(6,GO.hands[0].length);
+    if(GO.table.length>=lim)break;
+    var ranks=new Set();GO.table.forEach(function(p){ranks.add(rank(p.a));if(p.d!==null)ranks.add(rank(p.d));});
+    var bi=-1,bc=1e9;
+    for(var i=0;i<GO.hands[1].length;i++){var cc=GO.hands[1][i];
+      if(ranks.has(rank(cc))){var co=(suit(cc)===GO.trump?20:0)+rank(cc);if(co<bc){bc=co;bi=i;}}}
+    if(bi<0)break;
+    if(difficulty==='easy'&&Math.random()<0.5)break;
+    GO.table.push({a:GO.hands[1].splice(bi,1)[0],d:null});
+    added=true;
+    await sleep(350);
+    if(!GO||GO.over)return;
+  }
+  GO.busy=false;
+  if(!added){ log('Андроид: бито'); endBoutOff(true); return; }
+  log('Андроид подкинул карты');
+  GO.phase='defend';selAtkNet=-1;renderOff();
+}
 function endBoutOff(defended){
+  GO.turnEndsAt=null;
   var def=1-GO.attacker;
   if(!defended){
     GO.table.forEach(function(p){GO.hands[def].push(p.a);if(p.d!==null)GO.hands[def].push(p.d);});
