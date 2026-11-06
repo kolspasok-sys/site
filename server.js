@@ -16,6 +16,7 @@ const PORT = process.env.PORT || 8080;
 const TURN_TIMEOUT = 45000;    // мс на ход
 const GRACE_PERIOD = 90000;    // мс на переподключение при обрыве
 const MAX_STAKE = 500, MIN_STAKE = 10;
+const VERSION = '1.1';            // меняй при каждом обновлении — клиент покажет версию в шапке
 
 /* ---------- хранилище ---------- */
 const DATA_FILE = path.join(__dirname, 'data.json');
@@ -378,10 +379,10 @@ server.on('upgrade', (req, socket) => {
     sessions.delete(session);
     if (session.room) leaveRoom(session);
   };
-  conn.send({ t: 'hello', server: 'durak-space/1.0' });
+  conn.send({ t: 'hello', server: 'durak-space', version: VERSION });
 });
 
 server.listen(PORT, () => {
-  console.log('🚀 Космический Дурак сервер: http://localhost:' + PORT);
+  console.log('🚀 Космический Дурак сервер v' + VERSION + ' — http://localhost:' + PORT);
   console.log('   Клиент раздаётся с этого же адреса (открой в двух вкладках/браузерах)');
 });
