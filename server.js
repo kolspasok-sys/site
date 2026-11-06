@@ -222,7 +222,6 @@ function handleMessage(session, m){
       const rec = db.users[name];
       if (!rec || rec.hash !== gc.sha256hex(Buffer.from(rec.salt + pass)))
         return session.conn.send({ t: 'error', msg: 'Неверный логин или пароль' });
-      for (const s of sessions) if (s !== session && s.name === name){ s.conn.send({ t: 'error', msg: 'Вход с другого устройства' }); s.conn.close(); }
       session.user = rec; session.name = name;
       session.conn.send({ t: 'auth_ok', name, balance: rec.balance, wins: rec.wins || 0, losses: rec.losses || 0 });
       break;
