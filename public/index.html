@@ -303,9 +303,9 @@ function cardHTML(c,cls,onclick){
 var CUR={trump:0}; // текущий козырь для cardHTML
 function validSelAttack(v){
   if(selNet.size===0)return false;
+  if(v.table.length===0)return selNet.size===1;
   var lim=Math.min(6,v.oppCount);
   if(v.table.length+selNet.size>lim)return false;
-  if(v.table.length===0)return true;
   var ranks=new Set();v.table.forEach(function(p){ranks.add(rank(p.a));if(p.d!==null)ranks.add(rank(p.d));});
   for(var i of selNet){if(!ranks.has(rank(v.myHand[i])))return false;}
   return true;
@@ -353,6 +353,7 @@ function renderView(v){
       a+='<button class="btn" '+(validSelAttack(v)?'':'disabled')+' onclick="'+(MODE==='net'?'netDoAttack':'offAttack')+'()">⚔️ Атаковать</button>';
       var allBeat=v.table.length>0&&v.table.every(function(p){return p.d!==null;});
       a+='<button class="btn ghost" '+(allBeat?'':'disabled')+' onclick="'+(MODE==='net'?'netDoBito':'offBito')+'()">✨ Бито</button>';
+      if(v.table.length===0&&selNet.size>1)a+='<span class="hint">Первый заход — только одной картой</span>';
     }
     if(v.defendTurn){
       a+='<button class="btn danger" onclick="'+(MODE==='net'?'netDoTake':'offTake')+'()">🖐 Взять карты</button>';
@@ -493,7 +494,11 @@ function netClickHand(i){
     if(selNet.has(i))selNet.delete(i);else selNet.add(i);
     renderNet();
   }else if(ON.await==='defend'&&ON.turn!==me){
-    if(selAtkNet<0){toast('Сначала выбери атаку на столе');return;}
+    if(selAtkNet<0||ON.table[selAtkNet].d!==null){
+      selAtkNet=-1;
+      for(var k=0;k<ON.table.length;k++){if(ON.table[k].d===null){selAtkNet=k;break;}}
+    }
+    if(selAtkNet<0){toast('Сейчас нечего отбивать');return;}
     var atk=ON.table[selAtkNet].a, def=ON.hand[i];
     if((suit(def)===suit(atk)&&rank(def)>rank(atk))||(suit(def)===ON.trump&&suit(atk)!==ON.trump)){
       wsSend({t:'beat',i:selAtkNet,card:def});
@@ -613,7 +618,11 @@ function offClickHand(i){
     if(selNet.has(i))selNet.delete(i);else selNet.add(i);
     renderOff();
   }else if(GO.phase==='defend'&&GO.attacker===1){
-    if(selAtkNet<0){toast('Сначала выбери атаку на столе');return;}
+    if(selAtkNet<0||GO.table[selAtkNet].d!==null){
+      selAtkNet=-1;
+      for(var k2=0;k2<GO.table.length;k2++){if(GO.table[k2].d===null){selAtkNet=k2;break;}}
+    }
+    if(selAtkNet<0){toast('Сейчас нечего отбивать');return;}
     var atk=GO.table[selAtkNet].a, def=GO.hands[0][i];
     if((suit(def)===suit(atk)&&rank(def)>rank(atk))||(suit(def)===GO.trump&&suit(atk)!==GO.trump)){
       GO.table[selAtkNet].d=def;GO.hands[0].splice(i,1);selAtkNet=-1;
@@ -699,9 +708,8 @@ function endBoutOff(defended){
   if(GO.deck.length===0){
     if(defended&&GO.hands[def].length===0)return endGameOff(def);
     if(GO.hands[GO.attacker].length===0)return endGameOff(GO.attacker);
-    GO.attacker=1-GO.attacker;
-    log('Колода пуста — ход переходит');
   }
+  if(defended){GO.attacker=def;log('Бито — следующим ходит '+(def===0?'ты':'Андроид'));}
   GO.phase='attack';
   renderOff();
   if(GO.attacker===1)botAttack();
