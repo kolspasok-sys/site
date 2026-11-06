@@ -365,6 +365,7 @@ function renderView(v){
 var WS_URL=(location.protocol==='https:'?'wss://':'ws://')+location.host;
 var ws=null, netName=null, netBal=0, myRole='guest', roomCodeNet=null, readySent=false;
 var MODE='net';
+var SERVER_VERSION=null;
 var ON=null, OVER=null, NET_UP=false;
 
 function connect(){
@@ -374,6 +375,7 @@ function connect(){
   ws.onerror=function(){$('authstatus').textContent='Не удалось подключиться к серверу.';};
   ws.onmessage=function(ev){
     var m; try{m=JSON.parse(ev.data);}catch(e){return;}
+    if(m.t==='hello'){SERVER_VERSION=(m.version||'?!');$('connchip').textContent='🛡 Честность: SHA-256+HMAC · сервер v'+SERVER_VERSION;$('authstatus').textContent='Сервер подключён (версия '+SERVER_VERSION+'). Войди или нажми «Играть без регистрации».';return;}
     if(m.t==='error'){toast(m.msg);return;}
     if(m.t==='auth_ok'){netName=m.name;netBal=m.balance;enterMenu();return;}
     if(m.t==='room'){roomCodeNet=m.code;myRole=m.role;enterLobby(m);return;}
@@ -387,7 +389,7 @@ function connect(){
     if(m.t==='notice'){toast(m.msg,true);return;}
   };
 }
-function setChip(up){NET_UP=up;$('connchip').textContent=(up?'🛡':'⚠️')+' Честность: SHA-256 + HMAC'+(up?'':' (офлайн)');}
+function setChip(up){NET_UP=up;$('connchip').textContent=(up?'🛡':'⚠️')+' Честность: SHA-256+HMAC'+(SERVER_VERSION?' · сервер v'+SERVER_VERSION:'')+(up?'':' (офлайн)');}
 function wsSend(o){if(ws&&ws.readyState===1){ws.send(JSON.stringify(o));return true;}toast('Нет соединения с сервером — обнови страницу');return false;}
 
 function doAuth(reg){
@@ -400,7 +402,7 @@ function enterMenu(){
   $('menu').classList.remove('hidden');
   $('menuname').textContent=netName;$('balname').textContent=netName;$('bal').textContent=netBal;
 }
-function doGuest(){wsSend({t:'guest'});}
+function doGuest(){wsSend({t:'guest'});setTimeout(function(){if(!netName)toast('Сервер не отвечает на гостевой вход — на нём старая версия server.js или он не был перезапущен. Замени файл и перезапусти: Ctrl+C, затем node server.js');},2500);}
 function renderRooms(list){
   var el=$('roomslist');
   if(!el)return;
@@ -446,7 +448,7 @@ function lstakeChanged(){
   $('lstakeval').textContent=s;$('lbank').textContent=s*2;$('lcomm').textContent=Math.floor(s*2*0.2);$('lwin').textContent=s*2-Math.floor(s*2*0.2);
   if(myRole==='host')wsSend({t:'stake',amount:s});
 }
-function netReady(){readySent=true;wsSend({t:'ready'});toast('Готовность отправлена',true);}
+function netReady(){readySent=true;wsSend({t:'ready'});toast('Готовность отправлена',true);setTimeout(function(){if($('lobby')&&!$('lobby').classList.contains('hidden')&&!OVER){toast('Игра не началась. Проверь: 1) вы в ОДНОМ столе — выше должны быть ДВА имени, 2) сервер перезапущен с новым server.js (в шапке версия v1.1, не ?!)');}},4000);}
 function netLeave(){wsSend({t:'leave'});enterMenu();}
 function netLeaveToMenu(){wsSend({t:'leave'});enterMenu();}
 function showGameScreen(){$('menu').classList.add('hidden');$('lobby').classList.add('hidden');$('game').classList.remove('hidden');}
